@@ -15,6 +15,7 @@ const bot = new TelegramBot(TOKEN, { polling: true });
 
 const userState = new Map();
 const botMessages = new Map();
+let cachedServices = [];
 
 // ================= CRM INTEGRATION =================
 
@@ -57,6 +58,20 @@ async function createLead(msg, service, userMessage) {
   }
 }
 
+// ================= SERVICES =================
+async function loadServices() {
+  try {
+    const res = await fetch(`${CRM_API}/api/services`);
+    cachedServices = await res.json();
+    console.log(`✅ ${cachedServices.length} xizmat yuklandi`);
+  } catch (e) {
+    console.error("Load services error:", e.message);
+  }
+}
+
+// Load services on startup
+loadServices();
+
 // ================= CLEAN FUNCTIONS =================
 
 async function sendAndStore(chatId, text, options = {}) {
@@ -77,6 +92,7 @@ async function sendMainMenu(chatId) {
   await sendAndStore(chatId, "Quyidagilardan birini tanlang 👇", {
     reply_markup: {
       keyboard: [
+        ["💻 Xizmatlar"],
         ["✍️ Savol yuborish"],
         ["🚀 Loyiham bor"],
         ["📞 Bog'lanish"],
@@ -128,6 +144,64 @@ bot.on("message", async (msg) => {
     userState.delete(chatId);
     await clearBotMessages(chatId);
     return sendMainMenu(chatId);
+  }
+
+  // 💻 Xizmatlar
+  if (msg.text === "💻 Xizmatlar") {
+    await clearBotMessages(chatId);
+    userState.set(chatId, "services");
+    
+    if (cachedServices.length === 0) {
+      await loadServices();
+    }
+    
+    let text = `<b>💻 Bizning xizmatlar</b>\n\n`;
+    const keyboard = [];
+    
+    for (let i = 0; i < cachedServices.length; i++) {
+      const s = cachedServices[i];
+      text += `${s.icon} <b>${s.name}</b>\n   💰 ${s.price} | ⏱ ${s.duration}\n\n`;
+      keyboard.push([`${s.icon} ${s.name}`]);
+    }
+    
+    text += `Xizmatni tanlang yoki batafsil ma'lumot so'rang 👇`;
+    keyboard.push(["🔙 Orqaga"]);
+    
+    return sendAndStore(chatId, text, {
+      parse_mode: "HTML",
+      reply_markup: { keyboard, resize_keyboard: true }
+    });
+  }
+
+  // Xizmat tanlanganida
+  if (userState.get(chatId) === "services" && msg.text && !msg.text.startsWith("🔙")) {
+    const selectedService = cachedServices.find(s => msg.text.includes(s.name));
+    if (selectedService) {
+      await clearBotMessages(chatId);
+      
+      let detailText = `<b>${selectedService.icon} ${selectedService.name}</b>\n\n`;
+      detailText += `${selectedService.description}\n\n`;
+      detailText += `💰 <b>Narx:</b> ${selectedService.price}\n`;
+      detailText += `⏱ <b>Muddat:</b> ${selectedService.duration}\n\n`;
+      detailText += `<b>✦ Imkoniyatlar:</b>\n`;
+      selectedService.features.forEach(f => {
+        detailText += `• ${f}\n`;
+      });
+      
+      detailText += `\n<i>Bu xizmat bo'yicha buyurtma berish yoki savol berish uchun "Loyiham bor" yoki "Savol yuborish" tugmalarini bosing.</i>`;
+      
+      return sendAndStore(chatId, detailText, {
+        parse_mode: "HTML",
+        reply_markup: {
+          keyboard: [
+            ["🚀 Loyiham bor"],
+            ["✍️ Savol yuborish"],
+            ["🔙 Orqaga"]
+          ],
+          resize_keyboard: true
+        }
+      });
+    }
   }
 
   // ✍️ Savol
